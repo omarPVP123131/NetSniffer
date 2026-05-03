@@ -111,6 +111,22 @@ class PaqueteICMP:
     payload: bytes = field(repr=False, default=b"")
 
 
+@dataclass
+class PaqueteIPv6:
+    """Encabezado IPv6 desempaquetado."""
+    version: int
+    clase_trafico: int
+    etiqueta_flujo: int
+    longitud_carga: int
+    siguiente_encabezado: int # Similar al protocolo_num de IPv4
+    limite_saltos: int        # Similar al TTL
+    ip_origen: str
+    ip_destino: str
+    tamano_total: int
+    protocolo_nombre: str
+    datos_transporte: bytes = field(repr=False, default=b"")
+    transporte: Optional[object] = field(repr=False, default=None)
+    
 # ────────────────────────────────────────────────────────────────────────────
 # Parsers individuales
 # ────────────────────────────────────────────────────────────────────────────
@@ -244,3 +260,64 @@ def parsear_ip(datos_crudos: bytes) -> Optional[PaqueteIP]:
         )
     except (struct.error, socket.error):
         return None
+
+# ────────────────────────────────────────────────────────────────────────────
+# Parser principal IPv6
+# ────────────────────────────────────────────────────────────────────────────
+
+def parsear_ipv6(datos_crudos: bytes) -> Optional[PaqueteIPv6]:
+    """Parsea un paquete IPv6."""
+    if len(datos_crudos) < 40:
+        return None
+    try:
+        # Estructura: !LHBB16s16s (L=4 bytes, H=2, B=1, 16s=IPs)
+        encabezado = struct.unpack("!LHBB16s16s", datos_crudos[:40])
+        
+        # El primer entero de 4 bytes contiene Version (4 bits), Clase (8 bits) y Flujo (20 bits)
+        v_c_f = encabezado[0]
+        version = v_c_f >> 28
+        siguiente_proto = encabezado[2]
+        
+        # Convertir bytes de IP a string legible
+        ip_o = socket.inet_ntop(socket.AF_INET6, encabezado[4])
+        ip_d = socket.inet_ntop(socket.AF_INET6, encabezado[5])
+        
+        payload = datos_crudos[40:]
+        
+        # Reutilizamos tus parsers de TCP/UDP/ICMP (ICMPv6 es distinto, pero por ahora...)
+        transporte = None
+        if siguiente_proto == 6:    transporte = _parsear_tcp(payload)
+        elif siguiente_proto == 17: transporte = _parsear_udp(payload)
+
+        return PaqueteIPv6(
+            version=version,
+            clase_trafico=(v_c_f >> 20) & 0xFF,
+            etiqueta_flujo=v_c_f & 0xFFFFF,
+            longitud_carga=encabezado[1],
+            siguiente_encabezado=siguiente_proto,
+            limite_saltos=encabezado[3],
+            ip_origen=ip_o, ip_destino=ip_d,
+            tamano_total=len(datos_crudos),
+            protocolo_nombre=nombre_protocolo(siguiente_proto),
+            datos_transporte=payload,
+            transporte=transporte
+        )
+    except Exception:
+        return None
+    
+def desempaquetar_red(datos: bytes) -> Optional[object]:
+    """
+    Detecta la versión de IP (v4 o v6) y delega al parser correcto.
+    """
+    if not datos:
+        return None
+    
+    # El primer nibble (4 bits) indica la versión
+    version = datos[0] >> 4
+    
+    if version == 4:
+        return parsear_ip(datos)
+    elif version == 6:
+        return parsear_ipv6(datos)
+        
+    return None

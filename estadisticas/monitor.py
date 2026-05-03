@@ -30,17 +30,18 @@ class Monitor:
         self.ips_origen: Counter = Counter()
         self.ips_destino: Counter = Counter()
         self.por_puerto: Counter = Counter()        # TCP/UDP únicamente
-
+        self.consumo_por_ip: Counter = Counter()
     # ── API pública ──────────────────────────────────────────────────────────
 
     def registrar(self, paquete: PaqueteIP):
-        """Actualiza todos los contadores con los datos del paquete."""
-        self.total += 1
-        self.bytes_totales += paquete.tamano_total
+        self.total += 1                  # <--- Eliminar duplicada
+        self.bytes_totales += paquete.tamano_total  # <--- Eliminar duplicada
         self.por_protocolo[paquete.protocolo_nombre] += 1
         self.ips_origen[paquete.ip_origen] += 1
         self.ips_destino[paquete.ip_destino] += 1
-
+        self.total += 1                  # <--- Dejar solo esta
+        self.bytes_totales += paquete.tamano_total  # <--- Dejar solo esta
+        
         # Estadísticas de puerto (solo TCP/UDP)
         from parsers.protocolos import PaqueteTCP, PaqueteUDP
         t = paquete.transporte
@@ -72,3 +73,7 @@ class Monitor:
 
     def top_puertos(self, n: int = 5) -> list[tuple[int, int]]:
         return self.por_puerto.most_common(n)
+
+    def top_talkers(self, n: int = 5) -> list[tuple[str, int]]:
+            """Devuelve las IPs que más tráfico (en bytes) han generado."""
+            return self.consumo_por_ip.most_common(n)
